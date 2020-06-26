@@ -35,24 +35,24 @@
 
     #ifdef _DEBUG
         #ifdef _WIN64
-            #pragma comment (lib, "GLFW_d64.lib")
+            #pragma comment (lib, "GLFW3_64.lib")
             #ifndef IN_SB6_LIB
                 #pragma comment (lib, "sb6_d64.lib")
             #endif
         #else
-            #pragma comment (lib, "GLFW_d32.lib")
+            #pragma comment (lib, "GLFW3.lib")
             #ifndef IN_SB6_LIB
                 #pragma comment (lib, "sb6_d32.lib")
             #endif
         #endif
     #else
         #ifdef _WIN64
-            #pragma comment (lib, "GLFW_r64.lib")
+            #pragma comment (lib, "GLFW3_64.lib")
             #ifndef IN_SB6_LIB
                 #pragma comment (lib, "sb6_r64.lib")
             #endif
         #else
-            #pragma comment (lib, "GLFW_r32.lib")
+            #pragma comment (lib, "GLFW3.lib")
             #ifndef IN_SB6_LIB
                 #pragma comment (lib, "sb6_r32.lib")
             #endif
@@ -66,15 +66,18 @@
 
 #define GLFW_NO_GLU 1
 #define GLFW_INCLUDE_GLCOREARB 1
-#include "GL/glfw.h"
+#include "glfw3.h"
 
 #include "sb6ext.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 namespace sb6
 {
+
+static GLFWwindow * window;
 
 class application
 {
@@ -93,47 +96,47 @@ public:
         }
 
         init();
-
-        glfwOpenWindowHint(GLFW_OPENGL_VERSION_MAJOR, info.majorVersion);
-        glfwOpenWindowHint(GLFW_OPENGL_VERSION_MINOR, info.minorVersion);
+        glfwSetErrorCallback(printError);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, info.majorVersion);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, info.minorVersion);
 
 #ifdef _DEBUG
-        glfwOpenWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
+        glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
 #endif /* _DEBUG */
-        glfwOpenWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        glfwOpenWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
-        glfwOpenWindowHint(GLFW_FSAA_SAMPLES, info.samples);
-        glfwOpenWindowHint(GLFW_STEREO, info.flags.stereo ? GL_TRUE : GL_FALSE);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
+        glfwWindowHint(GLFW_SAMPLES, info.samples);
+        glfwWindowHint(GLFW_STEREO, info.flags.stereo ? GL_TRUE : GL_FALSE);
         if (info.flags.fullscreen)
         {
             if (info.windowWidth == 0 || info.windowHeight == 0)
             {
-                GLFWvidmode mode;
-                glfwGetDesktopMode(&mode);
-                info.windowWidth = mode.Width;
-                info.windowHeight = mode.Height;
+                const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
+                info.windowWidth = mode->width;
+                info.windowHeight = mode->height;
             }
-            glfwOpenWindow(info.windowWidth, info.windowHeight, 8, 8, 8, 0, 32, 0, GLFW_FULLSCREEN);
+            window = glfwCreateWindow(info.windowWidth, info.windowHeight, info.title, glfwGetPrimaryMonitor(), NULL);
             glfwSwapInterval((int)info.flags.vsync);
         }
         else
         {
-            if (!glfwOpenWindow(info.windowWidth, info.windowHeight, 8, 8, 8, 0, 32, 0, GLFW_WINDOW))
+            window = glfwCreateWindow(info.windowWidth, info.windowHeight, info.title, NULL, NULL);
+            if (!window)
             {
                 fprintf(stderr, "Failed to open window\n");
                 return;
             }
         }
 
-        glfwSetWindowTitle(info.title);
-        glfwSetWindowSizeCallback(glfw_onResize);
-        glfwSetKeyCallback(glfw_onKey);
-        glfwSetMouseButtonCallback(glfw_onMouseButton);
-        glfwSetMousePosCallback(glfw_onMouseMove);
-        glfwSetMouseWheelCallback(glfw_onMouseWheel);
-        (info.flags.cursor ? glfwEnable : glfwDisable)(GLFW_MOUSE_CURSOR);
+        glfwMakeContextCurrent(window);
 
-        info.flags.stereo = (glfwGetWindowParam(GLFW_STEREO) ? 1 : 0);
+        glfwSetWindowSizeCallback(window, glfw_onResize);
+        glfwSetKeyCallback(window, glfw_onKey);
+        glfwSetMouseButtonCallback(window, glfw_onMouseButton);
+        glfwSetCursorPosCallback(window, glfw_onMouseMove);
+        glfwSetScrollCallback(window, glfw_onMouseWheel);
+        
+        glfwSetInputMode(window, GLFW_CURSOR, info.flags.cursor);
 
         gl3wInit();
 
@@ -163,14 +166,16 @@ public:
         {
             render(glfwGetTime());
 
-            glfwSwapBuffers();
+            glfwSwapBuffers(window);
+            glfwPollEvents();
 
-            running &= (glfwGetKey( GLFW_KEY_ESC ) == GLFW_RELEASE);
-            running &= (glfwGetWindowParam( GLFW_OPENED ) != GL_FALSE);
+            running &= (glfwGetKey(window, GLFW_KEY_ESCAPE ) == GLFW_RELEASE);
+            running &= (!glfwWindowShouldClose(window));
         } while(running);
 
         shutdown();
 
+        glfwDestroyWindow(window);
         glfwTerminate();
     }
 
@@ -188,7 +193,7 @@ public:
 #endif
         info.samples = 0;
         info.flags.all = 0;
-        info.flags.cursor = 1;
+        info.flags.cursor = GLFW_CURSOR_NORMAL;
 #ifdef _DEBUG
         info.flags.debug = 1;
 #endif
@@ -250,7 +255,11 @@ public:
 
     static void getMousePosition(int& x, int& y)
     {
-        glfwGetMousePos(&x, &y);
+        double xd;
+        double yd;
+        glfwGetCursorPos(window, &xd, &yd);
+        x = (int) floor(xd);
+        y = (int) floor(yd);
     }
 
 public:
@@ -266,13 +275,13 @@ public:
         {
             struct
             {
+                unsigned int    cursor;
                 unsigned int    fullscreen  : 1;
                 unsigned int    vsync       : 1;
-                unsigned int    cursor      : 1;
                 unsigned int    stereo      : 1;
                 unsigned int    debug       : 1;
             };
-            unsigned int        all;
+            uint64_t        all;
         } flags;
     };
 
@@ -280,28 +289,29 @@ protected:
     APPINFO     info;
     static      sb6::application * app;
 
-    static void GLFWCALL glfw_onResize(int w, int h)
+    static void glfw_onResize(GLFWwindow* window, int w, int h)
     {
         app->onResize(w, h);
     }
 
-    static void GLFWCALL glfw_onKey(int key, int action)
+    static void glfw_onKey(GLFWwindow* window, int key, int scancode, int action, int mods)
     {
         app->onKey(key, action);
     }
 
-    static void GLFWCALL glfw_onMouseButton(int button, int action)
+    static void glfw_onMouseButton(GLFWwindow* window, int button, int action, int mods)
     {
         app->onMouseButton(button, action);
     }
 
-    static void GLFWCALL glfw_onMouseMove(int x, int y)
+    static void glfw_onMouseMove(GLFWwindow* window, double x, double y)
     {
-        app->onMouseMove(x, y);
+        app->onMouseMove((int)floor(x), (int) floor(y));
     }
 
-    static void GLFWCALL glfw_onMouseWheel(int pos)
+    static void glfw_onMouseWheel(GLFWwindow* window, double xoffset, double yoffset)
     {
+        int pos = (int) floor(yoffset);
         app->onMouseWheel(pos);
     }
 
@@ -320,6 +330,11 @@ protected:
                                         GLvoid* userParam)
     {
         reinterpret_cast<application *>(userParam)->onDebugMessage(source, type, id, severity, length, message);
+    }
+
+    static void printError(int, const char * err)
+    {
+        fprintf(stderr, err);
     }
 };
 
